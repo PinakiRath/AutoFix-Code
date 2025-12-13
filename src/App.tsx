@@ -1,0 +1,249 @@
+import { useState } from 'react';
+import { Wrench } from 'lucide-react';
+import { ProjectInput } from './components/ProjectInput';
+import { AnalysisDisplay } from './components/AnalysisDisplay';
+import { ErrorInput } from './components/ErrorInput';
+import { RepairProgress } from './components/RepairProgress';
+import { FixedFiles } from './components/FixedFiles';
+import { ProjectAnalysis, RepairAttempt, ProjectFile, FileFix } from './types';
+import { selectDirectory, readProjectFiles, getFileTree, extractRelevantFiles } from './lib/fileSystem';
+import { analyzeProject, requestRepair, saveProject, saveRepairAttempt, saveModifiedFile } from './lib/api';
+
+const MAX_ITERATIONS = 5;
+
+function App() {
+  const [projectName, setProjectName] = useState<string | null>(null);
+  const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
+  const [analysis, setAnalysis] = useState<ProjectAnalysis | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [attempts, setAttempts] = useState<RepairAttempt[]>([]);
+  const [currentIteration, setCurrentIteration] = useState(0);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [allFixes, setAllFixes] = useState<FileFix[]>([]);
+
+  const handleSelectDirectory = async () => {
+    try {
+      setIsLoading(true);
+      const dirHandle = await selectDirectory();
+
+      if (!dirHandle) {
+        setIsLoading(false);
+        return;
+      }
+
+      setProjectName(dirHandle.name);
+      const files = await readProjectFiles(dirHandle);
+      setProjectFiles(files);
+
+      const packageJsonFile = files.find(f => f.path === 'package.json');
+      if (!packageJsonFile) {
+        alert('No package.json found. Please select a valid Node.js project.');
+        setIsLoading(false);
+        return;
+      }
+
+      const packageJson = JSON.parse(packageJsonFile.content);
+      const fileTree = getFileTree(files);
+      const projectAnalysis = await analyzeProject(packageJson, fileTree);
+      setAnalysis(projectAnalysis);
+
+      const project = await saveProject({
+        name: dirHandle.name,
+        source_path: dirHandle.name,
+        source_type: 'local',
+        language: projectAnalysis.language,
+        framework: projectAnalysis.framework || undefined,
+        status: 'analyzing',
+      });
+
+      setProjectId(project.id);
+      setIsLoading(false);
+    } catch (error) {
+      console.error('Error loading project:', error);
+      alert('Failed to load project. Please try again.');
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmitError = async (errorLog: string, apiKey: string) => {
+    if (!projectId || !analysis) {
+      alert('Please select a project first.');
+      return;
+    }
+
+    setIsProcessing(true);
+    setCurrentIteration(1);
+
+    try {
+      await runRepairLoop(errorLog, apiKey);
+    } catch (error) {
+      console.error('Repair failed:', error);
+      alert('Repair process failed. Please check the console for details.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const runRepairLoop = async (initialErrorLog: string, apiKey: string) => {
+    let errorLog = initialErrorLog;
+    let iteration = 1;
+    const fixesApplied: FileFix[] = [];
+
+    while (iteration <= MAX_ITERATIONS) {
+      setCurrentIteration(iteration);
+
+      const fileTree = getFileTree(projectFiles);
+      const relevantFiles = extractRelevantFiles(projectFiles, errorLog);
+      const relevantFilesData = relevantFiles.map(f => ({
+        path: f.path,
+        content: f.content,
+      }));
+
+      try {
+        const repairResponse = await requestRepair(
+          errorLog,
+          fileTree,
+          relevantFilesData,
+          apiKey,
+          iteration
+        );
+
+        const attemptData: RepairAttempt = {
+          id: crypto.randomUUID(),
+          iteration,
+          command: analysis?.recommendedCommand || 'npm run dev',
+          errorLog,
+          fixes: repairResponse.fixes,
+          success: false,
+          timestamp: new Date(),
+        };
+
+        if (projectId) {
+          const savedAttempt = await saveRepairAttempt({
+            project_id: projectId,
+            iteration,
+            command: attemptData.command,
+            stderr: errorLog,
+            error_detected: true,
+            ai_prompt: JSON.stringify({ errorLog, fileTree, relevantFiles: relevantFilesData }),
+            ai_response: repairResponse,
+            success: false,
+          });
+
+          for (const fix of repairResponse.fixes) {
+            const oldFile = projectFiles.find(f => f.path === fix.path);
+            await saveModifiedFile({
+              attempt_id: savedAttempt.id,
+              file_path: fix.path,
+              old_content: oldFile?.content || '',
+              new_content: fix.content,
+            });
+          }
+        }
+
+        fixesApplied.push(...repairResponse.fixes);
+        setAllFixes(fixesApplied);
+
+        const updatedFiles = projectFiles.map(file => {
+          const fix = repairResponse.fixes.find(f => f.path === file.path);
+          return fix ? { ...file, content: fix.content } : file;
+        });
+        setProjectFiles(updatedFiles);
+
+        setAttempts(prev => [...prev, attemptData]);
+
+        if (repairResponse.fixes.length === 0) {
+          attemptData.success = true;
+          setAttempts(prev => {
+            const updated = [...prev];
+            updated[updated.length - 1].success = true;
+            return updated;
+          });
+          break;
+        }
+
+        iteration++;
+      } catch (error) {
+        console.error(`Iteration ${iteration} failed:`, error);
+        const failedAttempt: RepairAttempt = {
+          id: crypto.randomUUID(),
+          iteration,
+          command: analysis?.recommendedCommand || 'npm run dev',
+          errorLog: `Repair iteration failed: ${error}`,
+          fixes: [],
+          success: false,
+          timestamp: new Date(),
+        };
+        setAttempts(prev => [...prev, failedAttempt]);
+        break;
+      }
+    }
+
+    if (iteration > MAX_ITERATIONS) {
+      alert(`Reached maximum iterations (${MAX_ITERATIONS}). Some issues may remain.`);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+      <div className="container mx-auto px-4 py-8 max-w-6xl">
+        <header className="text-center mb-12">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4">
+            <Wrench className="w-8 h-8 text-white" />
+          </div>
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">AutoFix</h1>
+          <p className="text-lg text-gray-600">
+            AI-powered code repair system for JavaScript and TypeScript projects
+          </p>
+        </header>
+
+        <div className="space-y-6">
+          {!projectName && (
+            <ProjectInput
+              onSelectDirectory={handleSelectDirectory}
+              isLoading={isLoading}
+              projectName={projectName}
+            />
+          )}
+
+          {projectName && !analysis && isLoading && (
+            <div className="text-center py-12">
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-gray-200 border-t-blue-600"></div>
+              <p className="mt-4 text-gray-600">Analyzing project...</p>
+            </div>
+          )}
+
+          {analysis && (
+            <>
+              <AnalysisDisplay analysis={analysis} />
+
+              {attempts.length === 0 && (
+                <ErrorInput
+                  onSubmitError={handleSubmitError}
+                  isProcessing={isProcessing}
+                />
+              )}
+
+              {attempts.length > 0 && (
+                <RepairProgress
+                  attempts={attempts}
+                  currentIteration={currentIteration}
+                  maxIterations={MAX_ITERATIONS}
+                />
+              )}
+
+              {allFixes.length > 0 && <FixedFiles fixes={allFixes} />}
+            </>
+          )}
+        </div>
+
+        <footer className="mt-12 text-center text-sm text-gray-500">
+          <p>Select a project, paste your error logs, and let AI fix your code automatically</p>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+export default App;
