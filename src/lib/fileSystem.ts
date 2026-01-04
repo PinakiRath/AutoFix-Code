@@ -30,16 +30,18 @@ const TEXT_EXTENSIONS = new Set([
 
 export async function selectDirectory(): Promise<FileSystemDirectoryHandle | null> {
   if (!('showDirectoryPicker' in window)) {
-    throw new Error('File System Access API is not supported in this browser');
+    alert('File System Access API is not supported in this browser. Please use Chrome, Edge, or another Chromium-based browser.');
+    return null;
   }
 
   try {
     return await window.showDirectoryPicker();
   } catch (error) {
     if ((error as Error).name === 'AbortError') {
-      return null;
+      return null; // User cancelled
     }
-    throw error;
+    console.error('Directory selection error:', error);
+    throw new Error('Failed to select directory. Please try again or use a different browser.');
   }
 }
 

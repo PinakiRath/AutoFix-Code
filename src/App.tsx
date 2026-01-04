@@ -61,12 +61,141 @@ function App() {
       setIsLoading(false);
     } catch (error) {
       console.error('Error loading project:', error);
-      alert('Failed to load project. Please try again.');
+      alert(`Failed to load project: ${(error as Error).message}`);
       setIsLoading(false);
     }
   };
 
-  const handleSubmitError = async (errorLog: string, apiKey: string) => {
+  const handleDemoProject = async () => {
+    try {
+      setIsLoading(true);
+      setProjectName('Demo React Project');
+      
+      // Create a demo project structure with more files
+      const demoFiles: ProjectFile[] = [
+        {
+          path: 'package.json',
+          content: JSON.stringify({
+            name: 'demo-react-app',
+            version: '1.0.0',
+            type: 'module',
+            dependencies: {
+              'react': '^18.2.0',
+              'react-dom': '^18.2.0'
+            },
+            devDependencies: {
+              'vite': '^4.0.0',
+              'typescript': '^4.9.0',
+              '@types/react': '^18.0.0',
+              '@types/react-dom': '^18.0.0'
+            },
+            scripts: {
+              'dev': 'vite',
+              'build': 'vite build',
+              'preview': 'vite preview'
+            }
+          }, null, 2),
+          type: 'file'
+        },
+        {
+          path: 'src/App.tsx',
+          content: `import React from 'react';
+
+function App() {
+  return (
+    <div className="App">
+      <h1>Demo React App</h1>
+      <p>This is a demo project for testing AutoFix functionality.</p>
+    </div>
+  );
+}
+
+export default App;`,
+          type: 'file'
+        },
+        {
+          path: 'src/main.tsx',
+          content: `import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.tsx'
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)`,
+          type: 'file'
+        },
+        {
+          path: 'index.html',
+          content: `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Demo React App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>`,
+          type: 'file'
+        },
+        {
+          path: 'vite.config.ts',
+          content: `import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+})`,
+          type: 'file'
+        }
+      ];
+      
+      console.log('Demo files created:', demoFiles);
+      setProjectFiles(demoFiles);
+
+      // Find and parse package.json
+      const packageJsonFile = demoFiles.find(f => f.path === 'package.json');
+      console.log('Package.json file found:', packageJsonFile);
+      
+      if (!packageJsonFile) {
+        throw new Error('Demo package.json not found');
+      }
+
+      const packageJson = JSON.parse(packageJsonFile.content);
+      console.log('Parsed package.json:', packageJson);
+      
+      const fileTree = getFileTree(demoFiles);
+      console.log('File tree:', fileTree);
+      
+      const projectAnalysis = await analyzeProject(packageJson, fileTree);
+      console.log('Project analysis:', projectAnalysis);
+      
+      setAnalysis(projectAnalysis);
+
+      const project = await saveProject({
+        name: 'Demo React Project',
+        source_path: 'demo',
+        source_type: 'demo',
+        language: projectAnalysis.language,
+        framework: projectAnalysis.framework || undefined,
+        status: 'analyzing',
+      });
+
+      console.log('Project saved:', project);
+      setProjectId(project.id);
+      setIsLoading(false);
+    } catch (error) {
+      console.error('Error loading demo project:', error);
+      alert(`Failed to load demo project: ${(error as Error).message}`);
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmitError = async (errorLog: string) => {
     if (!projectId || !analysis) {
       alert('Please select a project first.');
       return;
@@ -76,7 +205,7 @@ function App() {
     setCurrentIteration(1);
 
     try {
-      await runRepairLoop(errorLog, apiKey);
+      await runRepairLoop(errorLog);
     } catch (error) {
       console.error('Repair failed:', error);
       alert('Repair process failed. Please check the console for details.');
@@ -85,7 +214,7 @@ function App() {
     }
   };
 
-  const runRepairLoop = async (initialErrorLog: string, apiKey: string) => {
+  const runRepairLoop = async (initialErrorLog: string) => {
     let errorLog = initialErrorLog;
     let iteration = 1;
     const fixesApplied: FileFix[] = [];
@@ -105,7 +234,7 @@ function App() {
           errorLog,
           fileTree,
           relevantFilesData,
-          apiKey,
+          '', // No API key needed since server handles it
           iteration
         );
 
@@ -186,14 +315,14 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 dark">
       <div className="container mx-auto px-4 py-8 max-w-6xl">
         <header className="text-center mb-12">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4">
             <Wrench className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">AutoFix</h1>
-          <p className="text-lg text-gray-600">
+          <h1 className="text-4xl font-bold text-white mb-2">AutoFix</h1>
+          <p className="text-lg text-gray-300">
             AI-powered code repair system for JavaScript and TypeScript projects
           </p>
         </header>
@@ -202,6 +331,7 @@ function App() {
           {!projectName && (
             <ProjectInput
               onSelectDirectory={handleSelectDirectory}
+              onDemoProject={handleDemoProject}
               isLoading={isLoading}
               projectName={projectName}
             />
@@ -209,8 +339,8 @@ function App() {
 
           {projectName && !analysis && isLoading && (
             <div className="text-center py-12">
-              <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-gray-200 border-t-blue-600"></div>
-              <p className="mt-4 text-gray-600">Analyzing project...</p>
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-gray-600 border-t-blue-500"></div>
+              <p className="mt-4 text-gray-300">Analyzing project...</p>
             </div>
           )}
 
@@ -238,7 +368,7 @@ function App() {
           )}
         </div>
 
-        <footer className="mt-12 text-center text-sm text-gray-500">
+        <footer className="mt-12 text-center text-sm text-gray-400">
           <p>Select a project, paste your error logs, and let AI fix your code automatically</p>
         </footer>
       </div>
