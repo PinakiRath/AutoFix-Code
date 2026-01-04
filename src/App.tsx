@@ -160,8 +160,10 @@ export default defineConfig({
       // Find and parse package.json
       const packageJsonFile = demoFiles.find(f => f.path === 'package.json');
       console.log('Package.json file found:', packageJsonFile);
+      console.log('All file paths:', demoFiles.map(f => f.path));
       
       if (!packageJsonFile) {
+        console.error('Demo package.json not found in files:', demoFiles.map(f => ({ path: f.path, type: f.type })));
         throw new Error('Demo package.json not found');
       }
 
