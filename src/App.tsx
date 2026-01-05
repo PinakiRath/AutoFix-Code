@@ -36,22 +36,71 @@ function App() {
       const files = await readProjectFiles(dirHandle);
       setProjectFiles(files);
 
-      const packageJsonFile = files.find(f => f.path === 'package.json');
+      console.log('Files found:', files.map(f => f.path));
+
+      // Look for package.json at root or in subdirectories
+      let packageJsonFile = files.find(f => f.path === 'package.json');
+      
       if (!packageJsonFile) {
-        alert('No package.json found. Please select a valid Node.js project.');
-        setIsLoading(false);
-        return;
+        // Look for package.json in subdirectories
+        packageJsonFile = files.find(f => f.path.endsWith('/package.json') && f.path.split('/').length === 2);
       }
 
-      const packageJson = JSON.parse(packageJsonFile.content);
+      let packageJson = {};
+      let projectAnalysis;
+
+      if (packageJsonFile) {
+        // Node.js project with package.json
+        try {
+          packageJson = JSON.parse(packageJsonFile.content);
+          console.log('Found package.json:', packageJson);
+        } catch (error) {
+          console.error('Failed to parse package.json:', error);
+          alert('Found package.json but failed to parse it. Please check if it\'s valid JSON.');
+          setIsLoading(false);
+          return;
+        }
+      } else {
+        // Project without package.json - analyze based on file types
+        console.log('No package.json found, analyzing file types...');
+        const hasReactFiles = files.some(f => f.path.includes('.jsx') || f.path.includes('.tsx'));
+        const hasVueFiles = files.some(f => f.path.includes('.vue'));
+        const hasTypeScript = files.some(f => f.path.includes('.ts') || f.path.includes('.tsx'));
+        const hasJavaScript = files.some(f => f.path.includes('.js') || f.path.includes('.jsx'));
+        const hasHTML = files.some(f => f.path.includes('.html'));
+        const hasCSS = files.some(f => f.path.includes('.css') || f.path.includes('.scss'));
+
+        // Create a mock package.json for analysis
+        packageJson = {
+          name: dirHandle.name,
+          version: '1.0.0',
+          dependencies: {},
+          devDependencies: {}
+        };
+
+        // Add likely dependencies based on file types
+        if (hasReactFiles) {
+          (packageJson as any).dependencies.react = '^18.0.0';
+          (packageJson as any).dependencies['react-dom'] = '^18.0.0';
+        }
+        if (hasVueFiles) {
+          (packageJson as any).dependencies.vue = '^3.0.0';
+        }
+        if (hasTypeScript) {
+          (packageJson as any).devDependencies.typescript = '^4.0.0';
+        }
+
+        console.log('Generated mock package.json:', packageJson);
+      }
+
       const fileTree = getFileTree(files);
-      const projectAnalysis = await analyzeProject(packageJson, fileTree);
+      projectAnalysis = await analyzeProject(packageJson, fileTree);
       setAnalysis(projectAnalysis);
 
       const project = await saveProject({
         name: dirHandle.name,
         source_path: dirHandle.name,
-        source_type: 'local',
+        source_type: packageJsonFile ? 'local' : 'local-no-package-json',
         language: projectAnalysis.language,
         framework: projectAnalysis.framework || undefined,
         status: 'analyzing',
