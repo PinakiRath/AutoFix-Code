@@ -55,6 +55,7 @@ export async function requestRepair(
   iteration: number
 ): Promise<RepairResponse> {
   try {
+    console.log('Sending repair request to API...');
     const response = await api.post('/ai-repair', {
       errorLog,
       fileTree,
@@ -63,13 +64,19 @@ export async function requestRepair(
       iteration,
     } as RepairRequest);
 
+    console.log('Repair response received:', response.data);
     return response.data;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Repair request failed:', error);
-    // Return empty fixes for now to prevent app from breaking
+    
+    if (error.response?.data) {
+      throw new Error(error.response.data.error || 'API request failed');
+    }
+    
+    // Return empty fixes to prevent app from breaking
     return {
       fixes: [],
-      analysis: 'API endpoint not available - repair functionality disabled',
+      analysis: `API request failed: ${error.message}. Please check if the server is running on port 3002.`,
     };
   }
 }

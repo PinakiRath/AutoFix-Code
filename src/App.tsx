@@ -259,7 +259,7 @@ export default defineConfig({
       await runRepairLoop(errorLog);
     } catch (error) {
       console.error('Repair failed:', error);
-      alert('Repair process failed. Please check the console for details.');
+      alert(`Repair process failed: ${(error as Error).message}`);
     } finally {
       setIsProcessing(false);
     }

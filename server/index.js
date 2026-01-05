@@ -138,12 +138,13 @@ app.post('/api/analyze-project', async (req, res) => {
   }
 });
 
-// AI repair endpoint with DeepSeek integration
 app.post('/api/ai-repair', async (req, res) => {
   try {
+    console.log('Received AI repair request');
     const { errorLog, fileTree, relevantFiles, openaiApiKey, iteration } = req.body;
     
     if (!process.env.DEEPSEEK_API_KEY) {
+      console.error('DeepSeek API key not configured');
       return res.status(400).json({ 
         error: 'DeepSeek API key not configured',
         fixes: [],
@@ -152,83 +153,59 @@ app.post('/api/ai-repair', async (req, res) => {
     }
     
     // Prepare the context for DeepSeek
-    const filesContext = relevantFiles.map(file => 
-      `File: ${file.path}\n\`\`\`\n${file.content}\n\`\`\``
+    const filesContext = relevantFiles.slice(0, 5).map(file => 
+      `File: ${file.path}\n\`\`\`\n${file.content.substring(0, 2000)}\n\`\`\``
     ).join('\n\n');
     
-    const prompt = `You are an expert code repair assistant. Analyze the following error and provide fixes for the code.
+    const prompt = `You are an expert code repair assistant. Analyze the following error and provide fixes.
 
 ERROR LOG:
-${errorLog}
-
-PROJECT STRUCTURE:
-${fileTree.slice(0, 50).join('\n')}
+${errorLog.substring(0, 1000)}
 
 RELEVANT FILES:
 ${filesContext}
 
-TASK:
-1. Analyze the error and identify the root cause
-2. Provide specific code fixes for the files that need changes
-3. Return ONLY a JSON response with this exact structure:
-
+Return ONLY valid JSON with this structure:
 {
   "fixes": [
     {
       "path": "file/path.js",
-      "content": "complete fixed file content here",
-      "explanation": "brief explanation of what was fixed"
+      "content": "complete fixed file content",
+      "explanation": "what was fixed"
     }
   ],
-  "analysis": "detailed analysis of the error and solution"
+  "analysis": "brief analysis of the error"
 }
 
-IMPORTANT:
-- Only include files that actually need changes in the fixes array
-- Provide the complete file content, not just the changed parts
-- Focus on fixing the specific error mentioned in the error log
-- If no fixes are needed, return an empty fixes array
-- Keep explanations concise but informative`;
+If no fixes needed, return empty fixes array.`;
 
     console.log('Sending request to DeepSeek API...');
     
     const response = await deepseekApi.post('/chat/completions', {
       model: 'deepseek-coder',
       messages: [
-        {
-          role: 'system',
-          content: 'You are an expert code repair assistant. Always respond with valid JSON only.'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
+        { role: 'system', content: 'You are a code repair expert. Respond with valid JSON only.' },
+        { role: 'user', content: prompt }
       ],
       temperature: 0.1,
-      max_tokens: 4000,
+      max_tokens: 2000,
     });
 
     const aiResponse = response.data.choices[0].message.content;
     console.log('DeepSeek response received');
     
-    // Try to parse the JSON response
     let parsedResponse;
     try {
-      // Clean the response in case it has markdown formatting
       const cleanedResponse = aiResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
       parsedResponse = JSON.parse(cleanedResponse);
     } catch (parseError) {
       console.error('Failed to parse AI response:', parseError);
-      console.log('Raw AI response:', aiResponse);
-      
-      // Fallback response
       parsedResponse = {
         fixes: [],
-        analysis: `AI analysis completed but response format was invalid. Raw response: ${aiResponse.substring(0, 500)}...`
+        analysis: 'AI provided analysis but response format was invalid'
       };
     }
     
-    // Ensure the response has the expected structure
     const result = {
       fixes: Array.isArray(parsedResponse.fixes) ? parsedResponse.fixes : [],
       analysis: parsedResponse.analysis || 'Analysis completed'
@@ -239,21 +216,11 @@ IMPORTANT:
     
   } catch (error) {
     console.error('AI repair error:', error);
-    
-    if (error.response) {
-      console.error('DeepSeek API error:', error.response.data);
-      res.status(500).json({ 
-        error: `DeepSeek API error: ${error.response.data.error?.message || 'Unknown error'}`,
-        fixes: [],
-        analysis: 'Failed to get AI analysis due to API error'
-      });
-    } else {
-      res.status(500).json({ 
-        error: 'AI repair failed',
-        fixes: [],
-        analysis: `Error: ${error.message}`
-      });
-    }
+    res.status(500).json({ 
+      error: error.response?.data?.error?.message || error.message || 'AI repair failed',
+      fixes: [],
+      analysis: 'Failed to get AI analysis'
+    });
   }
 });
 
