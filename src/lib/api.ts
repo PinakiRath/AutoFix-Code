@@ -39,10 +39,10 @@ export async function analyzeProject(
     return {
       language: 'JavaScript',
       framework: 'React',
-      dependencies: Object.keys(packageJson.dependencies || {}),
-      devDependencies: Object.keys(packageJson.devDependencies || {}),
+      packageManager: 'npm',
+      hasTypeScript: false,
+      availableScripts: Object.keys(packageJson.scripts || {}),
       recommendedCommand: 'npm run dev',
-      potentialIssues: ['API endpoint not available - using mock data'],
     };
   }
 }

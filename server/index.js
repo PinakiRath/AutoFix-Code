@@ -90,14 +90,18 @@ app.post('/api/analyze-project', async (req, res) => {
     // Simple analysis based on package.json
     const dependencies = Object.keys(packageJson.dependencies || {});
     const devDependencies = Object.keys(packageJson.devDependencies || {});
+    const scripts = Object.keys(packageJson.scripts || {});
     
     let language = 'JavaScript';
     let framework = null;
     let recommendedCommand = 'npm start';
+    let packageManager = 'npm';
+    let hasTypeScript = false;
     
     // Detect language
     if (devDependencies.includes('typescript') || dependencies.includes('typescript')) {
       language = 'TypeScript';
+      hasTypeScript = true;
     }
     
     // Detect framework
@@ -122,13 +126,22 @@ app.post('/api/analyze-project', async (req, res) => {
       recommendedCommand = 'npm run build';
     }
     
+    // Detect package manager
+    if (files.includes('yarn.lock')) {
+      packageManager = 'yarn';
+      recommendedCommand = recommendedCommand.replace('npm', 'yarn');
+    } else if (files.includes('pnpm-lock.yaml')) {
+      packageManager = 'pnpm';
+      recommendedCommand = recommendedCommand.replace('npm', 'pnpm');
+    }
+    
     const analysis = {
       language,
       framework,
-      dependencies,
-      devDependencies,
-      recommendedCommand,
-      potentialIssues: []
+      packageManager,
+      hasTypeScript,
+      availableScripts: scripts,
+      recommendedCommand
     };
     
     res.json(analysis);
